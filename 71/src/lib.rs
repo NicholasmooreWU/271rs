@@ -2,8 +2,8 @@
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ix {
-    pub sign: bool,     // false = positive or zero, true = negative
-    pub vals: Vec<u64>, // little-endian limbs: vals[0] = least significant
+    pub sign: bool,     
+    pub vals: Vec<u64>,
 }
 
 fn normalize_vals(v: &mut Vec<u64>) {
@@ -34,7 +34,6 @@ pub fn u64_to_ix(val: u64) -> ix {
     }
 }
 
-// Compare magnitudes: return true if a >= b
 pub fn gte_mag(a_vals: &Vec<u64>, b_vals: &Vec<u64>) -> bool {
     if a_vals.len() != b_vals.len() {
         return a_vals.len() > b_vals.len();
@@ -47,7 +46,6 @@ pub fn gte_mag(a_vals: &Vec<u64>, b_vals: &Vec<u64>) -> bool {
     true
 }
 
-// Compare magnitudes: returns -1 if a<b, 0 if equal, 1 if a>b
 pub fn cmp_mag(a_vals: &Vec<u64>, b_vals: &Vec<u64>) -> i8 {
     if a_vals.len() != b_vals.len() {
         return if a_vals.len() < b_vals.len() { -1 } else { 1 };
@@ -63,7 +61,6 @@ pub fn cmp_mag(a_vals: &Vec<u64>, b_vals: &Vec<u64>) -> i8 {
     0
 }
 
-// Add magnitudes: little-endian vectors
 pub fn add_mag(aug_vals: &Vec<u64>, add_vals: &Vec<u64>) -> Vec<u64> {
     let mut out = Vec::with_capacity(std::cmp::max(aug_vals.len(), add_vals.len()) + 1);
     let mut carry: u128 = 0;
@@ -90,7 +87,6 @@ pub fn add_mag(aug_vals: &Vec<u64>, add_vals: &Vec<u64>) -> Vec<u64> {
     out
 }
 
-// Subtract magnitudes: minuend - subtrahend; precondition: minuend >= subtrahend
 pub fn sub_mag(min_vals: &Vec<u64>, sub_vals: &Vec<u64>) -> Vec<u64> {
     let mut out = Vec::with_capacity(min_vals.len());
     let mut borrow: i128 = 0;
@@ -114,7 +110,6 @@ pub fn sub_mag(min_vals: &Vec<u64>, sub_vals: &Vec<u64>) -> Vec<u64> {
     out
 }
 
-// Sign-aware addition
 pub fn add_ix(a: &ix, b: &ix) -> ix {
     if a.vals.is_empty() {
         return b.clone();
@@ -152,7 +147,6 @@ pub fn add_ix(a: &ix, b: &ix) -> ix {
     }
 }
 
-// Sign-aware subtraction
 pub fn sub_ix(a: &ix, b: &ix) -> ix {
     let b = ix {
         sign: !b.sign,
@@ -161,7 +155,6 @@ pub fn sub_ix(a: &ix, b: &ix) -> ix {
     add_ix(a, &b)
 }
 
-// Multiplication (schoolbook method)
 pub fn mul_ix(a: &ix, b: &ix) -> ix {
     if a.vals.is_empty() || b.vals.is_empty() {
         return zero_ix();
@@ -178,7 +171,6 @@ pub fn mul_ix(a: &ix, b: &ix) -> ix {
             carry = prod >> 64;
         }
         if carry != 0 {
-            // add carry to next limb (handle possible carry chain)
             let mut k = i + m;
             let mut c = carry as u128;
             while c != 0 {
@@ -201,9 +193,6 @@ pub fn mul_ix(a: &ix, b: &ix) -> ix {
     res
 }
 
-// ----------------- Division helpers -----------------
-
-// bit length of magnitude (0 => 0)
 pub fn bit_len(vals: &Vec<u64>) -> usize {
     if vals.is_empty() {
         return 0;
@@ -213,7 +202,6 @@ pub fn bit_len(vals: &Vec<u64>) -> usize {
     (vals.len() - 1) * 64 + top_bits
 }
 
-// left shift magnitude by k bits
 pub fn shl_mag(vals: &Vec<u64>, k: usize) -> Vec<u64> {
     if vals.is_empty() {
         return vec![];
@@ -237,7 +225,6 @@ pub fn shl_mag(vals: &Vec<u64>, k: usize) -> Vec<u64> {
     out
 }
 
-// add a single bit (1 << k) into vals (little-endian) in-place
 pub fn add_bit_to_vec(vals: &mut Vec<u64>, k: usize) {
     let limb = k / 64;
     let bit = k % 64;
@@ -257,7 +244,6 @@ pub fn add_bit_to_vec(vals: &mut Vec<u64>, k: usize) {
     }
 }
 
-// div_rem on magnitudes: returns (q_vals, r_vals)
 pub fn div_rem_mag(a_vals: &Vec<u64>, b_vals: &Vec<u64>) -> (Vec<u64>, Vec<u64>) {
     if b_vals.is_empty() {
         panic!("division by zero");
@@ -290,7 +276,6 @@ pub fn div_rem_mag(a_vals: &Vec<u64>, b_vals: &Vec<u64>) -> (Vec<u64>, Vec<u64>)
     (q, rem)
 }
 
-// Division returning quotient ix
 pub fn div_ix(a: &ix, b: &ix) -> ix {
     if b.vals.is_empty() {
         panic!("division by zero");
@@ -310,7 +295,6 @@ pub fn div_ix(a: &ix, b: &ix) -> ix {
     q
 }
 
-// Remainder (a mod b), sign same as dividend (a)
 pub fn rem_ix(a: &ix, b: &ix) -> ix {
     if b.vals.is_empty() {
         panic!("division by zero");
@@ -329,10 +313,6 @@ pub fn rem_ix(a: &ix, b: &ix) -> ix {
     }
     r
 }
-
-// ----------------- I/O helpers -----------------
-
-// Parse hex string (0x...) to ix
 pub fn h2i_ix(s: &str) -> ix {
     let s = s.trim();
     let s = s.strip_prefix("0x").unwrap_or(s);
@@ -351,8 +331,6 @@ pub fn h2i_ix(s: &str) -> ix {
     normalize_vals(&mut vals);
     ix { sign: false, vals }
 }
-
-// Print ix as hex string (no 0x prefix, with sign if negative)
 pub fn see_ix(x: &ix) {
     if x.vals.is_empty() {
         print!("0");
