@@ -1,0 +1,388 @@
+#![allow(non_camel_case_types)]
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ix {
+    pub sign: bool,     
+    pub vals: Vec<u64>,
+}
+
+fn normalize_vals(v: &mut Vec<u64>) {
+    while let Some(&last) = v.last() {
+        if last == 0 {
+            v.pop();
+        } else {
+            break;
+        }
+    }
+}
+
+pub fn zero_ix() -> ix {
+    ix {
+        sign: false,
+        vals: vec![],
+    }
+}
+
+pub fn u64_to_ix(val: u64) -> ix {
+    if val == 0 {
+        zero_ix()
+    } else {
+        ix {
+            sign: false,
+            vals: vec![val],
+        }
+    }
+}
+
+pub fn gte_mag(a_vals: &Vec<u64>, b_vals: &Vec<u64>) -> bool {
+    if a_vals.len() != b_vals.len() {
+        return a_vals.len() > b_vals.len();
+    }
+    for i in (0..a_vals.len()).rev() {
+        if a_vals[i] != b_vals[i] {
+            return a_vals[i] > b_vals[i];
+        }
+    }
+    true
+}
+
+pub fn cmp_mag(a_vals: &Vec<u64>, b_vals: &Vec<u64>) -> i8 {
+    if a_vals.len() != b_vals.len() {
+        return if a_vals.len() < b_vals.len() { -1 } else { 1 };
+    }
+    for i in (0..a_vals.len()).rev() {
+        if a_vals[i] < b_vals[i] {
+            return -1;
+        }
+        if a_vals[i] > b_vals[i] {
+            return 1;
+        }
+    }
+    0
+}
+
+pub fn add_mag(aug_vals: &Vec<u64>, add_vals: &Vec<u64>) -> Vec<u64> {
+    let mut out = Vec::with_capacity(std::cmp::max(aug_vals.len(), add_vals.len()) + 1);
+    let mut carry: u128 = 0;
+    let n = std::cmp::max(aug_vals.len(), add_vals.len());
+    for i in 0..n {
+        let a = if i < aug_vals.len() { aug_vals[i] as u128 } else { 0 };
+        let b = if i < add_vals.len() { add_vals[i] as u128 } else { 0 };
+        let sum = a + b + carry;
+        out.push((sum & ((1u128 << 64) - 1)) as u64);
+        carry = sum >> 64;
+    }
+    if carry != 0 {
+        out.push(carry as u64);
+    }
+    normalize_vals(&mut out);
+    out
+}
+
+pub fn sub_mag(min_vals: &Vec<u64>, sub_vals: &Vec<u64>) -> Vec<u64> {
+    let mut out = Vec::with_capacity(min_vals.len());
+    let mut borrow: i128 = 0;
+    for i in 0..min_vals.len() {
+        let a = min_vals[i] as i128;
+        let b = if i < sub_vals.len() { sub_vals[i] as i128 } else { 0 };
+        let mut cur = a - b - borrow;
+        if cur < 0 {
+            cur += 1i128 << 64;
+            borrow = 1;
+        } else {
+            borrow = 0;
+        }
+        out.push(cur as u64);
+    }
+    normalize_vals(&mut out);
+    out
+}
+
+pub fn add_ix(a: &ix, b: &ix) -> ix {
+    if a.vals.is_empty() {
+        return b.clone();
+    }
+    if b.vals.is_empty() {
+        return a.clone();
+    }
+
+    if a.sign == b.sign {
+        let vals = add_mag(&a.vals, &b.vals);
+        let mut res = ix { sign: a.sign, vals };
+        normalize_vals(&mut res.vals);
+        if res.vals.is_empty() {
+            res.sign = false;
+        }
+        res
+    } else {
+        if gte_mag(&a.vals, &b.vals) {
+            let vals = sub_mag(&a.vals, &b.vals);
+            let mut res = ix { sign: a.sign, vals };
+            normalize_vals(&mut res.vals);
+            if res.vals.is_empty() {
+                res.sign = false;
+            }
+            res
+        } else {
+            let vals = sub_mag(&b.vals, &a.vals);
+            let mut res = ix { sign: b.sign, vals };
+            normalize_vals(&mut res.vals);
+            if res.vals.is_empty() {
+                res.sign = false;
+            }
+            res
+        }
+    }
+}
+
+pub fn sub_ix(a: &ix, b: &ix) -> ix {
+    let b = ix {
+        sign: !b.sign,
+        vals: b.vals.clone(),
+    };
+    add_ix(a, &b)
+}
+
+pub fn mul_ix(a: &ix, b: &ix) -> ix {
+    if a.vals.is_empty() || b.vals.is_empty() {
+        return zero_ix();
+    }
+    let n = a.vals.len();
+    let m = b.vals.len();
+    let mut out = vec![0u64; n + m];
+    for i in 0..n {
+        let mut carry: u128 = 0;
+        for j in 0..m {
+            let idx = i + j;
+            let prod = (a.vals[i] as u128) * (b.vals[j] as u128) + (out[idx] as u128) + carry;
+            out[idx] = (prod & ((1u128 << 64) - 1)) as u64;
+            carry = prod >> 64;
+        }
+        if carry != 0 {
+            let mut k = i + m;
+            let mut c = carry as u128;
+            while c != 0 {
+                if k >= out.len() {
+                    out.push(0);
+                }
+                let sum = (out[k] as u128) + c;
+                out[k] = (sum & ((1u128 << 64) - 1)) as u64;
+                c = sum >> 64;
+                k += 1;
+            }
+        }
+    }
+    normalize_vals(&mut out);
+    let sign = a.sign ^ b.sign;
+    let mut res = ix { sign, vals: out };
+    if res.vals.is_empty() {
+        res.sign = false;
+    }
+    res
+}
+
+pub fn bit_len(vals: &Vec<u64>) -> usize {
+    if vals.is_empty() {
+        return 0;
+    }
+    let top = vals.last().unwrap();
+    let top_bits = 64 - top.leading_zeros() as usize;
+    (vals.len() - 1) * 64 + top_bits
+}
+
+pub fn shl_mag(vals: &Vec<u64>, k: usize) -> Vec<u64> {
+    if vals.is_empty() {
+        return vec![];
+    }
+    let limb_shift = k / 64;
+    let rem = k % 64;
+    let mut out = vec![0u64; limb_shift + vals.len() + 1];
+    if rem == 0 {
+        for i in 0..vals.len() {
+            out[i + limb_shift] = vals[i];
+        }
+    } else {
+        for i in 0..vals.len() {
+            let low = vals[i].wrapping_shl(rem as u32);
+            let high = vals[i].wrapping_shr((64 - rem) as u32);
+            out[i + limb_shift] |= low;
+            out[i + limb_shift + 1] |= high;
+        }
+    }
+    normalize_vals(&mut out);
+    out
+}
+
+pub fn add_bit_to_vec(vals: &mut Vec<u64>, k: usize) {
+    let limb = k / 64;
+    let bit = k % 64;
+    if vals.len() <= limb {
+        vals.resize(limb + 1, 0);
+    }
+    let mut carry: u128 = (1u128 << bit) as u128;
+    let mut i = limb;
+    while carry != 0 {
+        if i >= vals.len() {
+            vals.push(0);
+        }
+        let sum = (vals[i] as u128) + carry;
+        vals[i] = (sum & ((1u128 << 64) - 1)) as u64;
+        carry = sum >> 64;
+        i += 1;
+    }
+}
+
+pub fn div_rem_mag(a_vals: &Vec<u64>, b_vals: &Vec<u64>) -> (Vec<u64>, Vec<u64>) {
+    if b_vals.is_empty() {
+        panic!("division by zero");
+    }
+    if a_vals.is_empty() {
+        return (vec![], vec![]);
+    }
+    if cmp_mag(a_vals, b_vals) < 0 {
+        return (vec![], a_vals.clone());
+    }
+
+    let mut rem = a_vals.clone();
+    let mut q: Vec<u64> = vec![];
+
+    let a_bits = bit_len(a_vals);
+    let b_bits = bit_len(b_vals);
+    let mut shift = a_bits as isize - b_bits as isize;
+
+    while shift >= 0 {
+        let shift_usize = shift as usize;
+        let t = shl_mag(b_vals, shift_usize);
+        if cmp_mag(&t, &rem) <= 0 {
+            rem = sub_mag(&rem, &t);
+            add_bit_to_vec(&mut q, shift_usize);
+        }
+        shift -= 1;
+    }
+    normalize_vals(&mut q);
+    normalize_vals(&mut rem);
+    (q, rem)
+}
+
+pub fn div_ix(a: &ix, b: &ix) -> ix {
+    if b.vals.is_empty() {
+        panic!("division by zero");
+    }
+    if a.vals.is_empty() {
+        return zero_ix();
+    }
+
+    let (mut q_vals, r_vals) = div_rem_mag(&a.vals, &b.vals);
+
+    if (a.sign ^ b.sign) && !r_vals.is_empty() {
+        q_vals = add_mag(&q_vals, &vec![1u64]);
+    }
+
+    let mut q = ix {
+        sign: a.sign ^ b.sign,
+        vals: q_vals,
+    };
+    normalize_vals(&mut q.vals);
+    if q.vals.is_empty() {
+        q.sign = false;
+    }
+    q
+}
+
+pub fn rem_ix(a: &ix, b: &ix) -> ix {
+    if b.vals.is_empty() {
+        panic!("division by zero");
+    }
+    if a.vals.is_empty() {
+        return zero_ix();
+    }
+
+    let (_q_vals, mut r_vals) = div_rem_mag(&a.vals, &b.vals);
+    if (a.sign ^ b.sign) && !r_vals.is_empty() {
+        r_vals = sub_mag(&b.vals, &r_vals);
+    }
+
+    let mut r = ix {
+        sign: b.sign && !r_vals.is_empty(),
+        vals: r_vals,
+    };
+    normalize_vals(&mut r.vals);
+    if r.vals.is_empty() {
+        r.sign = false;
+    }
+    r
+}
+
+pub fn h2i_ix(s: &str) -> ix {
+    let s = s.trim();
+    if s.is_empty() {
+        return zero_ix();
+    }
+
+    let (neg, mut body) = if s.starts_with('-') {
+        (true, &s[1..])
+    } else {
+        (false, s)
+    };
+
+    body = body.strip_prefix("0x").or_else(|| body.strip_prefix("0X")).unwrap_or(body);
+
+    if body.is_empty() {
+        return zero_ix();
+    }
+
+    let mut vals = vec![];
+    let mut i = body.len();
+    while i > 0 {
+        let start = if i >= 16 { i - 16 } else { 0 };
+        let chunk = &body[start..i];
+        let limb = u64::from_str_radix(chunk, 16).expect("bad hex input");
+        vals.push(limb);
+        i = start;
+    }
+    normalize_vals(&mut vals);
+    if vals.is_empty() {
+        zero_ix()
+    } else {
+        ix { sign: neg, vals }
+    }
+}
+
+pub fn ix_to_hex_string(x: &ix) -> String {
+    if x.vals.is_empty() {
+        return "0x0".to_string();
+    }
+    let mut parts = vec![];
+    for &limb in x.vals.iter().rev() {
+        parts.push(format!("{:016x}", limb));
+    }
+    let mut joined = parts.join("");
+    while joined.len() > 1 && joined.starts_with('0') {
+        joined.remove(0);
+    }
+    if x.sign {
+        format!("-0x{}", joined)
+    } else {
+        format!("0x{}", joined)
+    }
+}
+
+pub fn see_ix(x: &ix) {
+    if x.vals.is_empty() {
+        print!("0");
+        return;
+    }
+    if x.sign {
+        print!("-");
+    }
+    let mut parts = vec![];
+    for &limb in x.vals.iter().rev() {
+        parts.push(format!("{:016x}", limb));
+    }
+    let mut joined = parts.join("");
+    while joined.len() > 1 && joined.starts_with('0') {
+        joined.remove(0);
+    }
+    print!("{}", joined);
+}
+
