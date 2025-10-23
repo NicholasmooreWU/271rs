@@ -1,0 +1,1212 @@
+[1mdiff --git a/71/src/lib.rs.bak b/71/src/lib.rs.bak[m
+[1mdeleted file mode 100644[m
+[1mindex e69b58e..0000000[m
+[1m--- a/71/src/lib.rs.bak[m
+[1m+++ /dev/null[m
+[36m@@ -1,321 +0,0 @@[m
+[31m-#![allow(non_camel_case_types)][m
+[31m-[m
+[31m-#[derive(Clone, Debug, PartialEq, Eq)][m
+[31m-pub struct ix {[m
+[31m-    pub sign: bool,     // false = positive or zero, true = negative[m
+[31m-    pub vals: Vec<u64>, // little-endian limbs: vals[0] = least significant[m
+[31m-}[m
+[31m-[m
+[31m-fn normalize_vals(v: &mut Vec<u64>) {[m
+[31m-    while let Some(&last) = v.last() {[m
+[31m-        if last == 0 {[m
+[31m-            v.pop();[m
+[31m-        } else {[m
+[31m-            break;[m
+[31m-        }[m
+[31m-    }[m
+[31m-}[m
+[31m-[m
+[31m-pub fn zero_ix() -> ix {[m
+[31m-    ix { sign: false, vals: vec![] }[m
+[31m-}[m
+[31m-[m
+[31m-pub fn u64_to_ix(val: u64) -> ix {[m
+[31m-    if val == 0 {[m
+[31m-        zero_ix()[m
+[31m-    } else {[m
+[31m-        ix { sign: false, vals: vec![val] }[m
+[31m-    }[m
+[31m-}[m
+[31m-[m
+[31m-// Compare magnitudes: return true if a >= b[m
+[31m-pub fn gte_mag(a_vals: &Vec<u64>, b_vals: &Vec<u64>) -> bool {[m
+[31m-    if a_vals.len() != b_vals.len() {[m
+[31m-        return a_vals.len() > b_vals.len();[m
+[31m-    }[m
+[31m-    for i in (0..a_vals.len()).rev() {[m
+[31m-        if a_vals[i] != b_vals[i] {[m
+[31m-            return a_vals[i] > b_vals[i];[m
+[31m-        }[m
+[31m-    }[m
+[31m-    true[m
+[31m-}[m
+[31m-[m
+[31m-// Compare magnitudes: returns -1 if a<b, 0 if equal, 1 if a>b[m
+[31m-pub fn cmp_mag(a_vals: &Vec<u64>, b_vals: &Vec<u64>) -> i8 {[m
+[31m-    if a_vals.len() != b_vals.len() {[m
+[31m-        return if a_vals.len() < b_vals.len() { -1 } else { 1 };[m
+[31m-    }[m
+[31m-    for i in (0..a_vals.len()).rev() {[m
+[31m-        if a_vals[i] < b_vals[i] { return -1; }[m
+[31m-        if a_vals[i] > b_vals[i] { return 1; }[m
+[31m-    }[m
+[31m-    0[m
+[31m-}[m
+[31m-[m
+[31m-// Add magnitudes: little-endian vectors[m
+[31m-pub fn add_mag(aug_vals: &Vec<u64>, add_vals: &Vec<u64>) -> Vec<u64> {[m
+[31m-    let mut out = Vec::with_capacity(std::cmp::max(aug_vals.len(), add_vals.len()) + 1);[m
+[31m-    let mut carry: u128 = 0;[m
+[31m-    let n = std::cmp::max(aug_vals.len(), add_vals.len());[m
+[31m-    for i in 0..n {[m
+[31m-        let a = if i < aug_vals.len() { aug_vals[i] as u128 } else { 0 };[m
+[31m-        let b = if i < add_vals.len() { add_vals[i] as u128 } else { 0 };[m
+[31m-        let sum = a + b + carry;[m
+[31m-        out.push((sum & ((1u128<<64) - 1)) as u64);[m
+[31m-        carry = sum >> 64;[m
+[31m-    }[m
+[31m-    if carry != 0 {[m
+[31m-        out.push(carry as u64);[m
+[31m-    }[m
+[31m-    normalize_vals(&mut out);[m
+[31m-    out[m
+[31m-}[m
+[31m-[m
+[31m-// Subtract magnitudes: minuend - subtrahend; precondition: minuend >= subtrahend[m
+[31m-pub fn sub_mag(min_vals: &Vec<u64>, sub_vals: &Vec<u64>) -> Vec<u64> {[m
+[31m-    let mut out = Vec::with_capacity(min_vals.len());[m
+[31m-    let mut borrow: i128 = 0;[m
+[31m-    for i in 0..min_vals.len() {[m
+[31m-        let a = min_vals[i] as i128;[m
+[31m-        let b = if i < sub_vals.len() { sub_vals[i] as i128 } else { 0 };[m
+[31m-        let mut cur = a - b - borrow;[m
+[31m-        if cur < 0 {[m
+[31m-            cur += 1i128 << 64;[m
+[31m-            borrow = 1;[m
+[31m-        } else {[m
+[31m-            borrow = 0;[m
+[31m-        }[m
+[31m-        out.push(cur as u64);[m
+[31m-    }[m
+[31m-    normalize_vals(&mut out);[m
+[31m-    out[m
+[31m-}[m
+[31m-[m
+[31m-// Sign-aware addition[m
+[31m-pub fn add_ix(a: &ix, b: &ix) -> ix {[m
+[31m-    if a.vals.is_empty() { return b.clone(); }[m
+[31m-    if b.vals.is_empty() { return a.clone(); }[m
+[31m-[m
+[31m-    if a.sign == b.sign {[m
+[31m-        let vals = add_mag(&a.vals, &b.vals);[m
+[31m-        let mut res = ix { sign: a.sign, vals };[m
+[31m-        normalize_vals(&mut res.vals);[m
+[31m-        if res.vals.is_empty() { res.sign = false; }[m
+[31m-        res[m
+[31m-    } else {[m
+[31m-        if gte_mag(&a.vals, &b.vals) {[m
+[31m-            let vals = sub_mag(&a.vals, &b.vals);[m
+[31m-            let mut res = ix { sign: a.sign, vals };[m
+[31m-            normalize_vals(&mut res.vals);[m
+[31m-            if res.vals.is_empty() { res.sign = false; }[m
+[31m-            res[m
+[31m-        } else {[m
+[31m-            let vals = sub_mag(&b.vals, &a.vals);[m
+[31m-            let mut res = ix { sign: b.sign, vals };[m
+[31m-            normalize_vals(&mut res.vals);[m
+[31m-            if res.vals.is_empty() { res.sign = false; }[m
+[31m-            res[m
+[31m-        }[m
+[31m-    }[m
+[31m-}[m
+[31m-[m
+[31m-// Sign-aware subtraction[m
+[31m-pub fn sub_ix(a: &ix, b: &ix) -> ix {[m
+[31m-    let b = ix { sign: !b.sign, vals: b.vals.clone() };[m
+[31m-    add_ix(a, &b)[m
+[31m-}[m
+[31m-[m
+[31m-// Multiplication (schoolbook method)[m
+[31m-pub fn mul_ix(a: &ix, b: &ix) -> ix {[m
+[31m-    if a.vals.is_empty() || b.vals.is_empty() {[m
+[31m-        return zero_ix();[m
+[31m-    }[m
+[31m-    let n = a.vals.len();[m
+[31m-    let m = b.vals.len();[m
+[31m-    let mut out = vec![0u64; n + m];[m
+[31m-    for i in 0..n {[m
+[31m-        let mut carry: u128 = 0;[m
+[31m-        for j in 0..m {[m
+[31m-            let idx = i + j;[m
+[31m-            let prod = (a.vals[i] as u128) * (b.vals[j] as u128)[m
+[31m-                + (out[idx] as u128) + carry;[m
+[31m-            out[idx] = (prod & ((1u128<<64)-1)) as u64;[m
+[31m-            carry = prod >> 64;[m
+[31m-        }[m
+[31m-        if carry != 0 {[m
+[31m-            // add carry to next limb (handle possible carry chain)[m
+[31m-            let mut k = i + m;[m
+[31m-            let mut c = carry as u128;[m
+[31m-            while c != 0 {[m
+[31m-                if k >= out.len() { out.push(0); }[m
+[31m-                let sum = (out[k] as u128) + c;[m
+[31m-                out[k] = (sum & ((1u128<<64)-1)) as u64;[m
+[31m-                c = sum >> 64;[m
+[31m-                k += 1;[m
+[31m-            }[m
+[31m-        }[m
+[31m-    }[m
+[31m-    normalize_vals(&mut out);[m
+[31m-    let sign = a.sign ^ b.sign;[m
+[31m-    let mut res = ix { sign, vals: out };[m
+[31m-    if res.vals.is_empty() { res.sign = false; }[m
+[31m-    res[m
+[31m-}[m
+[31m-[m
+[31m-// ----------------- Division helpers -----------------[m
+[31m-[m
+[31m-// bit length of magnitude (0 => 0)[m
+[31m-pub fn bit_len(vals: &Vec<u64>) -> usize {[m
+[31m-    if vals.is_empty() { return 0; }[m
+[31m-    let top = vals.last().unwrap();[m
+[31m-    let top_bits = 64 - top.leading_zeros() as usize;[m
+[31m-    (vals.len() - 1) * 64 + top_bits[m
+[31m-}[m
+[31m-[m
+[31m-// left shift magnitude by k bits[m
+[31m-pub fn shl_mag(vals: &Vec<u64>, k: usize) -> Vec<u64> {[m
+[31m-    if vals.is_empty() { return vec![]; }[m
+[31m-    let limb_shift = k / 64;[m
+[31m-    let rem = k % 64;[m
+[31m-    let mut out = vec![0u64; limb_shift + vals.len() + 1];[m
+[31m-    let carry: u64 = 0;[m
+[31m-    if rem == 0 {[m
+[31m-        for i in 0..vals.len() {[m
+[31m-            out[i + limb_shift] = vals[i];[m
+[31m-        }[m
+[31m-    } else {[m
+[31m-        for i in 0..vals.len() {[m
+[31m-            let low = vals[i].wrapping_shl(rem as u32);[m
+[31m-            let high = vals[i].wrapping_shr((64 - rem) as u32);[m
+[31m-            out[i + limb_shift] |= low;[m
+[31m-            out[i + limb_shift + 1] |= high;[m
+[31m-        }[m
+[31m-    }[m
+[31m-    normalize_vals(&mut out);[m
+[31m-    out[m
+[31m-}[m
+[31m-[m
+[31m-// add a single bit (1 << k) into vals (little-endian) in-place[m
+[31m-pub fn add_bit_to_vec(vals: &mut Vec<u64>, k: usize) {[m
+[31m-    let limb = k / 64;[m
+[31m-    let bit = k % 64;[m
+[31m-    if vals.len() <= limb {[m
+[31m-        vals.resize(limb + 1, 0);[m
+[31m-    }[m
+[31m-    let mut carry: u128 = (1u128 << bit) as u128;[m
+[31m-    let mut i = limb;[m
+[31m-    while carry != 0 {[m
+[31m-        if i >= vals.len() { vals.push(0); }[m
+[31m-        let sum = (vals[i] as u128) + carry;[m
+[31m-        vals[i] = (sum & ((1u128<<64)-1)) as u64;[m
+[31m-        carry = sum >> 64;[m
+[31m-        i += 1;[m
+[31m-    }[m
+[31m-}[m
+[31m-[m
+[31m-// div_rem on magnitudes: returns (q_vals, r_vals)[m
+[31m-pub fn div_rem_mag(a_vals: &Vec<u64>, b_vals: &Vec<u64>) -> (Vec<u64>, Vec<u64>) {[m
+[31m-    if b_vals.is_empty() {[m
+[31m-        panic!("division by zero");[m
+[31m-    }[m
+[31m-    if a_vals.is_empty() {[m
+[31m-        return (vec![], vec![]);[m
+[31m-    }[m
+[31m-    if cmp_mag(a_vals, b_vals) < 0 {[m
+[31m-        return (vec![], a_vals.clone());[m
+[31m-    }[m
+[31m-[m
+[31m-    let mut rem = a_vals.clone();[m
+[31m-    let mut q: Vec<u64> = vec![];[m
+[31m-[m
+[31m-    let a_bits = bit_len(a_vals);[m
+[31m-    let b_bits = bit_len(b_vals);[m
+[31m-    let mut shift = a_bits as isize - b_bits as isize;[m
+[31m-[m
+[31m-    while shift >= 0 {[m
+[31m-        let shift_usize = shift as usize;[m
+[31m-        let t = shl_mag(b_vals, shift_usize);[m
+[31m-        if cmp_mag(&t, &rem) <= 0 {[m
+[31m-            rem = sub_mag(&rem, &t);[m
+[31m-            add_bit_to_vec(&mut q, shift_usize);[m
+[31m-        }[m
+[31m-        shift -= 1;[m
+[31m-    }[m
+[31m-    normalize_vals(&mut q);[m
+[31m-    normalize_vals(&mut rem);[m
+[31m-    (q, rem)[m
+[31m-}[m
+[31m-[m
+[31m-// Division returning quotient ix[m
+[31m-pub fn div_ix(a: &ix, b: &ix) -> ix {[m
+[31m-    if b.vals.is_empty() {[m
+[31m-        panic!("division by zero");[m
+[31m-    }[m
+[31m-    if a.vals.is_empty() {[m
+[31m-        return zero_ix();[m
+[31m-    }[m
+[31m-    let (q_vals, _) = div_rem_mag(&a.vals, &b.vals);[m
+[31m-    let mut q = ix { sign: a.sign ^ b.sign, vals: q_vals };[m
+[31m-    normalize_vals(&mut q.vals);[m
+[31m-    if q.vals.is_empty() { q.sign = false; }[m
+[31m-    q[m
+[31m-}[m
+[31m-[m
+[31m-// Remainder (a mod b), sign same as dividend (a)[m
+[31m-pub fn rem_ix(a: &ix, b: &ix) -> ix {[m
+[31m-    if b.vals.is_empty() {[m
+[31m-        panic!("division by zero");[m
+[31m-    }[m
+[31m-    if a.vals.is_empty() {[m
+[31m-        return zero_ix();[m
+[31m-    }[m
+[31m-    let (_, r_vals) = div_rem_mag(&a.vals, &b.vals);[m
+[31m-    let mut r = ix { sign: a.sign, vals: r_vals };[m
+[31m-    normalize_vals(&mut r.vals);[m
+[31m-    if r.vals.is_empty() { r.sign = false; }[m
+[31m-    r[m
+[31m-}[m
+[31m-[m
+[31m-// ----------------- I/O helpers -----------------[m
+[31m-[m
+[31m-// Parse hex string (0x...) to ix[m
+[31m-pub fn h2i_ix(s: &str) -> ix {[m
+[31m-    let s = s.trim();[m
+[31m-    let s = s.strip_prefix("0x").unwrap_or(s);[m
+[31m-    if s.is_empty() {[m
+[31m-        return zero_ix();[m
+[31m-    }[m
+[31m-    let mut vals = vec![];[m
+[31m-    let mut i = s.len();[m
+[31m-    while i > 0 {[m
+[31m-        let start = if i >= 16 { i - 16 } else { 0 };[m
+[31m-        let chunk = &s[start..i];[m
+[31m-        let limb = u64::from_str_radix(chunk, 16).expect("bad hex input");[m
+[31m-        vals.push(limb);[m
+[31m-        i = start;[m
+[31m-    }[m
+[31m-    normalize_vals(&mut vals);[m
+[31m-    ix { sign: false, vals }[m
+[31m-}[m
+[31m-[m
+[31m-// Print ix as hex string (no 0x prefix, with sign if negative)[m
+[31m-pub fn see_ix(x: &ix) {[m
+[31m-    if x.vals.is_empty() {[m
+[31m-        print!("0");[m
+[31m-        return;[m
+[31m-    }[m
+[31m-    if x.sign {[m
+[31m-        print!("-");[m
+[31m-    }[m
+[31m-    let mut parts = vec![];[m
+[31m-    for &limb in x.vals.iter().rev() {[m
+[31m-        parts.push(format!("{:016x}", limb));[m
+[31m-    }[m
+[31m-    let mut joined = parts.join("");[m
+[31m-    while joined.len() > 1 && joined.starts_with('0') {[m
+[31m-        joined.remove(0);[m
+[31m-    }[m
+[31m-    print!("{}", joined);[m
+[31m-}[m
+[31m-[m
+[1mdiff --git a/72/Cargo.lock b/72/Cargo.lock[m
+[1mdeleted file mode 100644[m
+[1mindex 2a2e8dd..0000000[m
+[1m--- a/72/Cargo.lock[m
+[1m+++ /dev/null[m
+[36m@@ -1,7 +0,0 @@[m
+[31m-# This file is automatically @generated by Cargo.[m
+[31m-# It is not intended for manual editing.[m
+[31m-version = 4[m
+[31m-[m
+[31m-[[package]][m
+[31m-name = "bignum"[m
+[31m-version = "0.1.0"[m
+[1mdiff --git a/72/Cargo.toml b/72/Cargo.toml[m
+[1mdeleted file mode 100644[m
+[1mindex 883a4c7..0000000[m
+[1m--- a/72/Cargo.toml[m
+[1m+++ /dev/null[m
+[36m@@ -1,6 +0,0 @@[m
+[31m-[package][m
+[31m-name = "bignum"[m
+[31m-version = "0.1.0"[m
+[31m-edition = "2024"[m
+[31m-[m
+[31m-[dependencies][m
+[1mdiff --git a/72/src/ix.rs b/72/src/ix.rs[m
+[1mdeleted file mode 100644[m
+[1mindex aac043d..0000000[m
+[1m--- a/72/src/ix.rs[m
+[1m+++ /dev/null[m
+[36m@@ -1,388 +0,0 @@[m
+[31m-#![allow(non_camel_case_types)][m
+[31m-[m
+[31m-#[derive(Clone, Debug, PartialEq, Eq)][m
+[31m-pub struct ix {[m
+[31m-    pub sign: bool,     [m
+[31m-    pub vals: Vec<u64>,[m
+[31m-}[m
+[31m-[m
+[31m-fn normalize_vals(v: &mut Vec<u64>) {[m
+[31m-    while let Some(&last) = v.last() {[m
+[31m-        if last == 0 {[m
+[31m-            v.pop();[m
+[31m-        } else {[m
+[31m-            break;[m
+[31m-        }[m
+[31m-    }[m
+[31m-}[m
+[31m-[m
+[31m-pub fn zero_ix() -> ix {[m
+[31m-    ix {[m
+[31m-        sign: false,[m
+[31m-        vals: vec![],[m
+[31m-    }[m
+[31m-}[m
+[31m-[m
+[31m-pub fn u64_to_ix(val: u64) -> ix {[m
+[31m-    if val == 0 {[m
+[31m-        zero_ix()[m
+[31m-    } else {[m
+[31m-        ix {[m
+[31m-            sign: false,[m
+[31m-            vals: vec![val],[m
+[31m-        }[m
+[31m-    }[m
+[31m-}[m
+[31m-[m
+[31m-pub fn gte_mag(a_vals: &Vec<u64>, b_vals: &Vec<u64>) -> bool {[m
+[31m-    if a_vals.len() != b_vals.len() {[m
+[31m-        return a_vals.len() > b_vals.len();[m
+[31m-    }[m
+[31m-    for i in (0..a_vals.len()).rev() {[m
+[31m-        if a_vals[i] != b_vals[i] {[m
+[31m-            return a_vals[i] > b_vals[i];[m
+[31m-        }[m
+[31m-    }[m
+[31m-    true[m
+[31m-}[m
+[31m-[m
+[31m-pub fn cmp_mag(a_vals: &Vec<u64>, b_vals: &Vec<u64>) -> i8 {[m
+[31m-    if a_vals.len() != b_vals.len() {[m
+[31m-        return if a_vals.len() < b_vals.len() { -1 } else { 1 };[m
+[31m-    }[m
+[31m-    for i in (0..a_vals.len()).rev() {[m
+[31m-        if a_vals[i] < b_vals[i] {[m
+[31m-            return -1;[m
+[31m-        }[m
+[31m-        if a_vals[i] > b_vals[i] {[m
+[31m-            return 1;[m
+[31m-        }[m
+[31m-    }[m
+[31m-    0[m
+[31m-}[m
+[31m-[m
+[31m-pub fn add_mag(aug_vals: &Vec<u64>, add_vals: &Vec<u64>) -> Vec<u64> {[m
+[31m-    let mut out = Vec::with_capacity(std::cmp::max(aug_vals.len(), add_vals.len()) + 1);[m
+[31m-    let mut carry: u128 = 0;[m
+[31m-    let n = std::cmp::max(aug_vals.len(), add_vals.len());[m
+[31m-    for i in 0..n {[m
+[31m-        let a = if i < aug_vals.len() { aug_vals[i] as u128 } else { 0 };[m
+[31m-        let b = if i < add_vals.len() { add_vals[i] as u128 } else { 0 };[m
+[31m-        let sum = a + b + carry;[m
+[31m-        out.push((sum & ((1u128 << 64) - 1)) as u64);[m
+[31m-        carry = sum >> 64;[m
+[31m-    }[m
+[31m-    if carry != 0 {[m
+[31m-        out.push(carry as u64);[m
+[31m-    }[m
+[31m-    normalize_vals(&mut out);[m
+[31m-    out[m
+[31m-}[m
+[31m-[m
+[31m-pub fn sub_mag(min_vals: &Vec<u64>, sub_vals: &Vec<u64>) -> Vec<u64> {[m
+[31m-    let mut out = Vec::with_capacity(min_vals.len());[m
+[31m-    let mut borrow: i128 = 0;[m
+[31m-    for i in 0..min_vals.len() {[m
+[31m-        let a = min_vals[i] as i128;[m
+[31m-        let b = if i < sub_vals.len() { sub_vals[i] as i128 } else { 0 };[m
+[31m-        let mut cur = a - b - borrow;[m
+[31m-        if cur < 0 {[m
+[31m-            cur += 1i128 << 64;[m
+[31m-            borrow = 1;[m
+[31m-        } else {[m
+[31m-            borrow = 0;[m
+[31m-        }[m
+[31m-        out.push(cur as u64);[m
+[31m-    }[m
+[31m-    normalize_vals(&mut out);[m
+[31m-    out[m
+[31m-}[m
+[31m-[m
+[31m-pub fn add_ix(a: &ix, b: &ix) -> ix {[m
+[31m-    if a.vals.is_empty() {[m
+[31m-        return b.clone();[m
+[31m-    }[m
+[31m-    if b.vals.is_empty() {[m
+[31m-        return a.clone();[m
+[31m-    }[m
+[31m-[m
+[31m-    if a.sign == b.sign {[m
+[31m-        let vals = add_mag(&a.vals, &b.vals);[m
+[31m-        let mut res = ix { sign: a.sign, vals };[m
+[31m-        normalize_vals(&mut res.vals);[m
+[31m-        if res.vals.is_empty() {[m
+[31m-            res.sign = false;[m
+[31m-        }[m
+[31m-        res[m
+[31m-    } else {[m
+[31m-        if gte_mag(&a.vals, &b.vals) {[m
+[31m-            let vals = sub_mag(&a.vals, &b.vals);[m
+[31m-            let mut res = ix { sign: a.sign, vals };[m
+[31m-            normalize_vals(&mut res.vals);[m
+[31m-            if res.vals.is_empty() {[m
+[31m-                res.sign = false;[m
+[31m-            }[m
+[31m-            res[m
+[31m-        } else {[m
+[31m-            let vals = sub_mag(&b.vals, &a.vals);[m
+[31m-            let mut res = ix { sign: b.sign, vals };[m
+[31m-            normalize_vals(&mut res.vals);[m
+[31m-            if res.vals.is_empty() {[m
+[31m-                res.sign = false;[m
+[31m-            }[m
+[31m-            res[m
+[31m-        }[m
+[31m-    }[m
+[31m-}[m
+[31m-[m
+[31m-pub fn sub_ix(a: &ix, b: &ix) -> ix {[m
+[31m-    let b = ix {[m
+[31m-        sign: !b.sign,[m
+[31m-        vals: b.vals.clone(),[m
+[31m-    };[m
+[31m-    add_ix(a, &b)[m
+[31m-}[m
+[31m-[m
+[31m-pub fn mul_ix(a: &ix, b: &ix) -> ix {[m
+[31m-    if a.vals.is_empty() || b.vals.is_empty() {[m
+[31m-        return zero_ix();[m
+[31m-    }[m
+[31m-    let n = a.vals.len();[m
+[31m-    let m = b.vals.len();[m
+[31m-    let mut out = vec![0u64; n + m];[m
+[31m-    for i in 0..n {[m
+[31m-        let mut carry: u128 = 0;[m
+[31m-        for j in 0..m {[m
+[31m-            let idx = i + j;[m
+[31m-            let prod = (a.vals[i] as u128) * (b.vals[j] as u128) + (out[idx] as u128) + carry;[m
+[31m-            out[idx] = (prod & ((1u128 << 64) - 1)) as u64;[m
+[31m-            carry = prod >> 64;[m
+[31m-        }[m
+[31m-        if carry != 0 {[m
+[31m-            let mut k = i + m;[m
+[31m-            let mut c = carry as u128;[m
+[31m-            while c != 0 {[m
+[31m-                if k >= out.len() {[m
+[31m-                    out.push(0);[m
+[31m-                }[m
+[31m-                let sum = (out[k] as u128) + c;[m
+[31m-                out[k] = (sum & ((1u128 << 64) - 1)) as u64;[m
+[31m-                c = sum >> 64;[m
+[31m-                k += 1;[m
+[31m-            }[m
+[31m-        }[m
+[31m-    }[m
+[31m-    normalize_vals(&mut out);[m
+[31m-    let sign = a.sign ^ b.sign;[m
+[31m-    let mut res = ix { sign, vals: out };[m
+[31m-    if res.vals.is_empty() {[m
+[31m-        res.sign = false;[m
+[31m-    }[m
+[31m-    res[m
+[31m-}[m
+[31m-[m
+[31m-pub fn bit_len(vals: &Vec<u64>) -> usize {[m
+[31m-    if vals.is_empty() {[m
+[31m-        return 0;[m
+[31m-    }[m
+[31m-    let top = vals.last().unwrap();[m
+[31m-    let top_bits = 64 - top.leading_zeros() as usize;[m
+[31m-    (vals.len() - 1) * 64 + top_bits[m
+[31m-}[m
+[31m-[m
+[31m-pub fn shl_mag(vals: &Vec<u64>, k: usize) -> Vec<u64> {[m
+[31m-    if vals.is_empty() {[m
+[31m-        return vec![];[m
+[31m-    }[m
+[31m-    let limb_shift = k / 64;[m
+[31m-    let rem = k % 64;[m
+[31m-    let mut out = vec![0u64; limb_shift + vals.len() + 1];[m
+[31m-    if rem == 0 {[m
+[31m-        for i in 0..vals.len() {[m
+[31m-            out[i + limb_shift] = vals[i];[m
+[31m-        }[m
+[31m-    } else {[m
+[31m-        for i in 0..vals.len() {[m
+[31m-            let low = vals[i].wrapping_shl(rem as u32);[m
+[31m-            let high = vals[i].wrapping_shr((64 - rem) as u32);[m
+[31m-            out[i + limb_shift] |= low;[m
+[31m-            out[i + limb_shift + 1] |= high;[m
+[31m-        }[m
+[31m-    }[m
+[31m-    normalize_vals(&mut out);[m
+[31m-    out[m
+[31m-}[m
+[31m-[m
+[31m-pub fn add_bit_to_vec(vals: &mut Vec<u64>, k: usize) {[m
+[31m-    let limb = k / 64;[m
+[31m-    let bit = k % 64;[m
+[31m-    if vals.len() <= limb {[m
+[31m-        vals.resize(limb + 1, 0);[m
+[31m-    }[m
+[31m-    let mut carry: u128 = (1u128 << bit) as u128;[m
+[31m-    let mut i = limb;[m
+[31m-    while carry != 0 {[m
+[31m-        if i >= vals.len() {[m
+[31m-            vals.push(0);[m
+[31m-        }[m
+[31m-        let sum = (vals[i] as u128) + carry;[m
+[31m-        vals[i] = (sum & ((1u128 << 64) - 1)) as u64;[m
+[31m-        carry = sum >> 64;[m
+[31m-        i += 1;[m
+[31m-    }[m
+[31m-}[m
+[31m-[m
+[31m-pub fn div_rem_mag(a_vals: &Vec<u64>, b_vals: &Vec<u64>) -> (Vec<u64>, Vec<u64>) {[m
+[31m-    if b_vals.is_empty() {[m
+[31m-        panic!("division by zero");[m
+[31m-    }[m
+[31m-    if a_vals.is_empty() {[m
+[31m-        return (vec![], vec![]);[m
+[31m-    }[m
+[31m-    if cmp_mag(a_vals, b_vals) < 0 {[m
+[31m-        return (vec![], a_vals.clone());[m
+[31m-    }[m
+[31m-[m
+[31m-    let mut rem = a_vals.clone();[m
+[31m-    let mut q: Vec<u64> = vec![];[m
+[31m-[m
+[31m-    let a_bits = bit_len(a_vals);[m
+[31m-    let b_bits = bit_len(b_vals);[m
+[31m-    let mut shift = a_bits as isize - b_bits as isize;[m
+[31m-[m
+[31m-    while shift >= 0 {[m
+[31m-        let shift_usize = shift as usize;[m
+[31m-        let t = shl_mag(b_vals, shift_usize);[m
+[31m-        if cmp_mag(&t, &rem) <= 0 {[m
+[31m-            rem = sub_mag(&rem, &t);[m
+[31m-            add_bit_to_vec(&mut q, shift_usize);[m
+[31m-        }[m
+[31m-        shift -= 1;[m
+[31m-    }[m
+[31m-    normalize_vals(&mut q);[m
+[31m-    normalize_vals(&mut rem);[m
+[31m-    (q, rem)[m
+[31m-}[m
+[31m-[m
+[31m-pub fn div_ix(a: &ix, b: &ix) -> ix {[m
+[31m-    if b.vals.is_empty() {[m
+[31m-        panic!("division by zero");[m
+[31m-    }[m
+[31m-    if a.vals.is_empty() {[m
+[31m-        return zero_ix();[m
+[31m-    }[m
+[31m-[m
+[31m-    let (mut q_vals, r_vals) = div_rem_mag(&a.vals, &b.vals);[m
+[31m-[m
+[31m-    if (a.sign ^ b.sign) && !r_vals.is_empty() {[m
+[31m-        q_vals = add_mag(&q_vals, &vec![1u64]);[m
+[31m-    }[m
+[31m-[m
+[31m-    let mut q = ix {[m
+[31m-        sign: a.sign ^ b.sign,[m
+[31m-        vals: q_vals,[m
+[31m-    };[m
+[31m-    normalize_vals(&mut q.vals);[m
+[31m-    if q.vals.is_empty() {[m
+[31m-        q.sign = false;[m
+[31m-    }[m
+[31m-    q[m
+[31m-}[m
+[31m-[m
+[31m-pub fn rem_ix(a: &ix, b: &ix) -> ix {[m
+[31m-    if b.vals.is_empty() {[m
+[31m-        panic!("division by zero");[m
+[31m-    }[m
+[31m-    if a.vals.is_empty() {[m
+[31m-        return zero_ix();[m
+[31m-    }[m
+[31m-[m
+[31m-    let (_q_vals, mut r_vals) = div_rem_mag(&a.vals, &b.vals);[m
+[31m-    if (a.sign ^ b.sign) && !r_vals.is_empty() {[m
+[31m-        r_vals = sub_mag(&b.vals, &r_vals);[m
+[31m-    }[m
+[31m-[m
+[31m-    let mut r = ix {[m
+[31m-        sign: b.sign && !r_vals.is_empty(),[m
+[31m-        vals: r_vals,[m
+[31m-    };[m
+[31m-    normalize_vals(&mut r.vals);[m
+[31m-    if r.vals.is_empty() {[m
+[31m-        r.sign = false;[m
+[31m-    }[m
+[31m-    r[m
+[31m-}[m
+[31m-[m
+[31m-pub fn h2i_ix(s: &str) -> ix {[m
+[31m-    let s = s.trim();[m
+[31m-    if s.is_empty() {[m
+[31m-        return zero_ix();[m
+[31m-    }[m
+[31m-[m
+[31m-    let (neg, mut body) = if s.starts_with('-') {[m
+[31m-        (true, &s[1..])[m
+[31m-    } else {[m
+[31m-        (false, s)[m
+[31m-    };[m
+[31m-[m
+[31m-    body = body.strip_prefix("0x").or_else(|| body.strip_prefix("0X")).unwrap_or(body);[m
+[31m-[m
+[31m-    if body.is_empty() {[m
+[31m-        return zero_ix();[m
+[31m-    }[m
+[31m-[m
+[31m-    let mut vals = vec![];[m
+[31m-    let mut i = body.len();[m
+[31m-    while i > 0 {[m
+[31m-        let start = if i >= 16 { i - 16 } else { 0 };[m
+[31m-        let chunk = &body[start..i];[m
+[31m-        let limb = u64::from_str_radix(chunk, 16).expect("bad hex input");[m
+[31m-        vals.push(limb);[m
+[31m-        i = start;[m
+[31m-    }[m
+[31m-    normalize_vals(&mut vals);[m
+[31m-    if vals.is_empty() {[m
+[31m-        zero_ix()[m
+[31m-    } else {[m
+[31m-        ix { sign: neg, vals }[m
+[31m-    }[m
+[31m-}[m
+[31m-[m
+[31m-pub fn ix_to_hex_string(x: &ix) -> String {[m
+[31m-    if x.vals.is_empty() {[m
+[31m-        return "0x0".to_string();[m
+[31m-    }[m
+[31m-    let mut parts = vec![];[m
+[31m-    for &limb in x.vals.iter().rev() {[m
+[31m-        parts.push(format!("{:016x}", limb));[m
+[31m-    }[m
+[31m-    let mut joined = parts.join("");[m
+[31m-    while joined.len() > 1 && joined.starts_with('0') {[m
+[31m-        joined.remove(0);[m
+[31m-    }[m
+[31m-    if x.sign {[m
+[31m-        format!("-0x{}", joined)[m
+[31m-    } else {[m
+[31m-        format!("0x{}", joined)[m
+[31m-    }[m
+[31m-}[m
+[31m-[m
+[31m-pub fn see_ix(x: &ix) {[m
+[31m-    if x.vals.is_empty() {[m
+[31m-        print!("0");[m
+[31m-        return;[m
+[31m-    }[m
+[31m-    if x.sign {[m
+[31m-        print!("-");[m
+[31m-    }[m
+[31m-    let mut parts = vec![];[m
+[31m-    for &limb in x.vals.iter().rev() {[m
+[31m-        parts.push(format!("{:016x}", limb));[m
+[31m-    }[m
+[31m-    let mut joined = parts.join("");[m
+[31m-    while joined.len() > 1 && joined.starts_with('0') {[m
+[31m-        joined.remove(0);[m
+[31m-    }[m
+[31m-    print!("{}", joined);[m
+[31m-}[m
+[31m-[m
+[1mdiff --git a/72/src/lib.rs b/72/src/lib.rs[m
+[1mdeleted file mode 100644[m
+[1mindex aac043d..0000000[m
+[1m--- a/72/src/lib.rs[m
+[1m+++ /dev/null[m
+[36m@@ -1,388 +0,0 @@[m
+[31m-#![allow(non_camel_case_types)][m
+[31m-[m
+[31m-#[derive(Clone, Debug, PartialEq, Eq)][m
+[31m-pub struct ix {[m
+[31m-    pub sign: bool,     [m
+[31m-    pub vals: Vec<u64>,[m
+[31m-}[m
+[31m-[m
+[31m-fn normalize_vals(v: &mut Vec<u64>) {[m
+[31m-    while let Some(&last) = v.last() {[m
+[31m-        if last == 0 {[m
+[31m-            v.pop();[m
+[31m-        } else {[m
+[31m-            break;[m
+[31m-        }[m
+[31m-    }[m
+[31m-}[m
+[31m-[m
+[31m-pub fn zero_ix() -> ix {[m
+[31m-    ix {[m
+[31m-        sign: false,[m
+[31m-        vals: vec![],[m
+[31m-    }[m
+[31m-}[m
+[31m-[m
+[31m-pub fn u64_to_ix(val: u64) -> ix {[m
+[31m-    if val == 0 {[m
+[31m-        zero_ix()[m
+[31m-    } else {[m
+[31m-        ix {[m
+[31m-            sign: false,[m
+[31m-            vals: vec![val],[m
+[31m-        }[m
+[31m-    }[m
+[31m-}[m
+[31m-[m
+[31m-pub fn gte_mag(a_vals: &Vec<u64>, b_vals: &Vec<u64>) -> bool {[m
+[31m-    if a_vals.len() != b_vals.len() {[m
+[31m-        return a_vals.len() > b_vals.len();[m
+[31m-    }[m
+[31m-    for i in (0..a_vals.len()).rev() {[m
+[31m-        if a_vals[i] != b_vals[i] {[m
+[31m-            return a_vals[i] > b_vals[i];[m
+[31m-        }[m
+[31m-    }[m
+[31m-    true[m
+[31m-}[m
+[31m-[m
+[31m-pub fn cmp_mag(a_vals: &Vec<u64>, b_vals: &Vec<u64>) -> i8 {[m
+[31m-    if a_vals.len() != b_vals.len() {[m
+[31m-        return if a_vals.len() < b_vals.len() { -1 } else { 1 };[m
+[31m-    }[m
+[31m-    for i in (0..a_vals.len()).rev() {[m
+[31m-        if a_vals[i] < b_vals[i] {[m
+[31m-            return -1;[m
+[31m-        }[m
+[31m-        if a_vals[i] > b_vals[i] {[m
+[31m-            return 1;[m
+[31m-        }[m
+[31m-    }[m
+[31m-    0[m
+[31m-}[m
+[31m-[m
+[31m-pub fn add_mag(aug_vals: &Vec<u64>, add_vals: &Vec<u64>) -> Vec<u64> {[m
+[31m-    let mut out = Vec::with_capacity(std::cmp::max(aug_vals.len(), add_vals.len()) + 1);[m
+[31m-    let mut carry: u128 = 0;[m
+[31m-    let n = std::cmp::max(aug_vals.len(), add_vals.len());[m
+[31m-    for i in 0..n {[m
+[31m-        let a = if i < aug_vals.len() { aug_vals[i] as u128 } else { 0 };[m
+[31m-        let b = if i < add_vals.len() { add_vals[i] as u128 } else { 0 };[m
+[31m-        let sum = a + b + carry;[m
+[31m-        out.push((sum & ((1u128 << 64) - 1)) as u64);[m
+[31m-        carry = sum >> 64;[m
+[31m-    }[m
+[31m-    if carry != 0 {[m
+[31m-        out.push(carry as u64);[m
+[31m-    }[m
+[31m-    normalize_vals(&mut out);[m
+[31m-    out[m
+[31m-}[m
+[31m-[m
+[31m-pub fn sub_mag(min_vals: &Vec<u64>, sub_vals: &Vec<u64>) -> Vec<u64> {[m
+[31m-    let mut out = Vec::with_capacity(min_vals.len());[m
+[31m-    let mut borrow: i128 = 0;[m
+[31m-    for i in 0..min_vals.len() {[m
+[31m-        let a = min_vals[i] as i128;[m
+[31m-        let b = if i < sub_vals.len() { sub_vals[i] as i128 } else { 0 };[m
+[31m-        let mut cur = a - b - borrow;[m
+[31m-        if cur < 0 {[m
+[31m-            cur += 1i128 << 64;[m
+[31m-            borrow = 1;[m
+[31m-        } else {[m
+[31m-            borrow = 0;[m
+[31m-        }[m
+[31m-        out.push(cur as u64);[m
+[31m-    }[m
+[31m-    normalize_vals(&mut out);[m
+[31m-    out[m
+[31m-}[m
+[31m-[m
+[31m-pub fn add_ix(a: &ix, b: &ix) -> ix {[m
+[31m-    if a.vals.is_empty() {[m
+[31m-        return b.clone();[m
+[31m-    }[m
+[31m-    if b.vals.is_empty() {[m
+[31m-        return a.clone();[m
+[31m-    }[m
+[31m-[m
+[31m-    if a.sign == b.sign {[m
+[31m-        let vals = add_mag(&a.vals, &b.vals);[m
+[31m-        let mut res = ix { sign: a.sign, vals };[m
+[31m-        normalize_vals(&mut res.vals);[m
+[31m-        if res.vals.is_empty() {[m
+[31m-            res.sign = false;[m
+[31m-        }[m
+[31m-        res[m
+[31m-    } else {[m
+[31m-        if gte_mag(&a.vals, &b.vals) {[m
+[31m-            let vals = sub_mag(&a.vals, &b.vals);[m
+[31m-            let mut res = ix { sign: a.sign, vals };[m
+[31m-            normalize_vals(&mut res.vals);[m
+[31m-            if res.vals.is_empty() {[m
+[31m-                res.sign = false;[m
+[31m-            }[m
+[31m-            res[m
+[31m-        } else {[m
+[31m-            let vals = sub_mag(&b.vals, &a.vals);[m
+[31m-            let mut res = ix { sign: b.sign, vals };[m
+[31m-            normalize_vals(&mut res.vals);[m
+[31m-            if res.vals.is_empty() {[m
+[31m-                res.sign = false;[m
+[31m-            }[m
+[31m-            res[m
+[31m-        }[m
+[31m-    }[m
+[31m-}[m
+[31m-[m
+[31m-pub fn sub_ix(a: &ix, b: &ix) -> ix {[m
+[31m-    let b = ix {[m
+[31m-        sign: !b.sign,[m
+[31m-        vals: b.vals.clone(),[m
+[31m-    };[m
+[31m-    add_ix(a, &b)[m
+[31m-}[m
+[31m-[m
+[31m-pub fn mul_ix(a: &ix, b: &ix) -> ix {[m
+[31m-    if a.vals.is_empty() || b.vals.is_empty() {[m
+[31m-        return zero_ix();[m
+[31m-    }[m
+[31m-    let n = a.vals.len();[m
+[31m-    let m = b.vals.len();[m
+[31m-    let mut out = vec![0u64; n + m];[m
+[31m-    for i in 0..n {[m
+[31m-        let mut carry: u128 = 0;[m
+[31m-        for j in 0..m {[m
+[31m-            let idx = i + j;[m
+[31m-            let prod = (a.vals[i] as u128) * (b.vals[j] as u128) + (out[idx] as u128) + carry;[m
+[31m-            out[idx] = (prod & ((1u128 << 64) - 1)) as u64;[m
+[31m-            carry = prod >> 64;[m
+[31m-        }[m
+[31m-        if carry != 0 {[m
+[31m-            let mut k = i + m;[m
+[31m-            let mut c = carry as u128;[m
+[31m-            while c != 0 {[m
+[31m-                if k >= out.len() {[m
+[31m-                    out.push(0);[m
+[31m-                }[m
+[31m-                let sum = (out[k] as u128) + c;[m
+[31m-                out[k] = (sum & ((1u128 << 64) - 1)) as u64;[m
+[31m-                c = sum >> 64;[m
+[31m-                k += 1;[m
+[31m-            }[m
+[31m-        }[m
+[31m-    }[m
+[31m-    normalize_vals(&mut out);[m
+[31m-    let sign = a.sign ^ b.sign;[m
+[31m-    let mut res = ix { sign, vals: out };[m
+[31m-    if res.vals.is_empty() {[m
+[31m-        res.sign = false;[m
+[31m-    }[m
+[31m-    res[m
+[31m-}[m
+[31m-[m
+[31m-pub fn bit_len(vals: &Vec<u64>) -> usize {[m
+[31m-    if vals.is_empty() {[m
+[31m-        return 0;[m
+[31m-    }[m
+[31m-    let top = vals.last().unwrap();[m
+[31m-    let top_bits = 64 - top.leading_zeros() as usize;[m
+[31m-    (vals.len() - 1) * 64 + top_bits[m
+[31m-}[m
+[31m-[m
+[31m-pub fn shl_mag(vals: &Vec<u64>, k: usize) -> Vec<u64> {[m
+[31m-    if vals.is_empty() {[m
+[31m-        return vec![];[m
+[31m-    }[m
+[31m-    let limb_shift = k / 64;[m
+[31m-    let rem = k % 64;[m
+[31m-    let mut out = vec![0u64; limb_shift + vals.len() + 1];[m
+[31m-    if rem == 0 {[m
+[31m-        for i in 0..vals.len() {[m
+[31m-            out[i + limb_shift] = vals[i];[m
+[31m-        }[m
+[31m-    } else {[m
+[31m-        for i in 0..vals.len() {[m
+[31m-            let low = vals[i].wrapping_shl(rem as u32);[m
+[31m-            let high = vals[i].wrapping_shr((64 - rem) as u32);[m
+[31m-            out[i + limb_shift] |= low;[m
+[31m-            out[i + limb_shift + 1] |= high;[m
+[31m-        }[m
+[31m-    }[m
+[31m-    normalize_vals(&mut out);[m
+[31m-    out[m
+[31m-}[m
+[31m-[m
+[31m-pub fn add_bit_to_vec(vals: &mut Vec<u64>, k: usize) {[m
+[31m-    let limb = k / 64;[m
+[31m-    let bit = k % 64;[m
+[31m-    if vals.len() <= limb {[m
+[31m-        vals.resize(limb + 1, 0);[m
+[31m-    }[m
+[31m-    let mut carry: u128 = (1u128 << bit) as u128;[m
+[31m-    let mut i = limb;[m
+[31m-    while carry != 0 {[m
+[31m-        if i >= vals.len() {[m
+[31m-            vals.push(0);[m
+[31m-        }[m
+[31m-        let sum = (vals[i] as u128) + carry;[m
+[31m-        vals[i] = (sum & ((1u128 << 64) - 1)) as u64;[m
+[31m-        carry = sum >> 64;[m
+[31m-        i += 1;[m
+[31m-    }[m
+[31m-}[m
+[31m-[m
+[31m-pub fn div_rem_mag(a_vals: &Vec<u64>, b_vals: &Vec<u64>) -> (Vec<u64>, Vec<u64>) {[m
+[31m-    if b_vals.is_empty() {[m
+[31m-        panic!("division by zero");[m
+[31m-    }[m
+[31m-    if a_vals.is_empty() {[m
+[31m-        return (vec![], vec![]);[m
+[31m-    }[m
+[31m-    if cmp_mag(a_vals, b_vals) < 0 {[m
+[31m-        return (vec![], a_vals.clone());[m
+[31m-    }[m
+[31m-[m
+[31m-    let mut rem = a_vals.clone();[m
+[31m-    let mut q: Vec<u64> = vec![];[m
+[31m-[m
+[31m-    let a_bits = bit_len(a_vals);[m
+[31m-    let b_bits = bit_len(b_vals);[m
+[31m-    let mut shift = a_bits as isize - b_bits as isize;[m
+[31m-[m
+[31m-    while shift >= 0 {[m
+[31m-        let shift_usize = shift as usize;[m
+[31m-        let t = shl_mag(b_vals, shift_usize);[m
+[31m-        if cmp_mag(&t, &rem) <= 0 {[m
+[31m-            rem = sub_mag(&rem, &t);[m
+[31m-            add_bit_to_vec(&mut q, shift_usize);[m
+[31m-        }[m
+[31m-        shift -= 1;[m
+[31m-    }[m
+[31m-    normalize_vals(&mut q);[m
+[31m-    normalize_vals(&mut rem);[m
+[31m-    (q, rem)[m
+[31m-}[m
+[31m-[m
+[31m-pub fn div_ix(a: &ix, b: &ix) -> ix {[m
+[31m-    if b.vals.is_empty() {[m
+[31m-        panic!("division by zero");[m
+[31m-    }[m
+[31m-    if a.vals.is_empty() {[m
+[31m-        return zero_ix();[m
+[31m-    }[m
+[31m-[m
+[31m-    let (mut q_vals, r_vals) = div_rem_mag(&a.vals, &b.vals);[m
+[31m-[m
+[31m-    if (a.sign ^ b.sign) && !r_vals.is_empty() {[m
+[31m-        q_vals = add_mag(&q_vals, &vec![1u64]);[m
+[31m-    }[m
+[31m-[m
+[31m-    let mut q = ix {[m
+[31m-        sign: a.sign ^ b.sign,[m
+[31m-        vals: q_vals,[m
+[31m-    };[m
+[31m-    normalize_vals(&mut q.vals);[m
+[31m-    if q.vals.is_empty() {[m
+[31m-        q.sign = false;[m
+[31m-    }[m
+[31m-    q[m
+[31m-}[m
+[31m-[m
+[31m-pub fn rem_ix(a: &ix, b: &ix) -> ix {[m
+[31m-    if b.vals.is_empty() {[m
+[31m-        panic!("division by zero");[m
+[31m-    }[m
+[31m-    if a.vals.is_empty() {[m
+[31m-        return zero_ix();[m
+[31m-    }[m
+[31m-[m
+[31m-    let (_q_vals, mut r_vals) = div_rem_mag(&a.vals, &b.vals);[m
+[31m-    if (a.sign ^ b.sign) && !r_vals.is_empty() {[m
+[31m-        r_vals = sub_mag(&b.vals, &r_vals);[m
+[31m-    }[m
+[31m-[m
+[31m-    let mut r = ix {[m
+[31m-        sign: b.sign && !r_vals.is_empty(),[m
+[31m-        vals: r_vals,[m
+[31m-    };[m
+[31m-    normalize_vals(&mut r.vals);[m
+[31m-    if r.vals.is_empty() {[m
+[31m-        r.sign = false;[m
+[31m-    }[m
+[31m-    r[m
+[31m-}[m
+[31m-[m
+[31m-pub fn h2i_ix(s: &str) -> ix {[m
+[31m-    let s = s.trim();[m
+[31m-    if s.is_empty() {[m
+[31m-        return zero_ix();[m
+[31m-    }[m
+[31m-[m
+[31m-    let (neg, mut body) = if s.starts_with('-') {[m
+[31m-        (true, &s[1..])[m
+[31m-    } else {[m
+[31m-        (false, s)[m
+[31m-    };[m
+[31m-[m
+[31m-    body = body.strip_prefix("0x").or_else(|| body.strip_prefix("0X")).unwrap_or(body);[m
+[31m-[m
+[31m-    if body.is_empty() {[m
+[31m-        return zero_ix();[m
+[31m-    }[m
+[31m-[m
+[31m-    let mut vals = vec![];[m
+[31m-    let mut i = body.len();[m
+[31m-    while i > 0 {[m
+[31m-        let start = if i >= 16 { i - 16 } else { 0 };[m
+[31m-        let chunk = &body[start..i];[m
+[31m-        let limb = u64::from_str_radix(chunk, 16).expect("bad hex input");[m
+[31m-        vals.push(limb);[m
+[31m-        i = start;[m
+[31m-    }[m
+[31m-    normalize_vals(&mut vals);[m
+[31m-    if vals.is_empty() {[m
+[31m-        zero_ix()[m
+[31m-    } else {[m
+[31m-        ix { sign: neg, vals }[m
+[31m-    }[m
+[31m-}[m
+[31m-[m
+[31m-pub fn ix_to_hex_string(x: &ix) -> String {[m
+[31m-    if x.vals.is_empty() {[m
+[31m-        return "0x0".to_string();[m
+[31m-    }[m
+[31m-    let mut parts = vec![];[m
+[31m-    for &limb in x.vals.iter().rev() {[m
+[31m-        parts.push(format!("{:016x}", limb));[m
+[31m-    }[m
+[31m-    let mut joined = parts.join("");[m
+[31m-    while joined.len() > 1 && joined.starts_with('0') {[m
+[31m-        joined.remove(0);[m
+[31m-    }[m
+[31m-    if x.sign {[m
+[31m-        format!("-0x{}", joined)[m
+[31m-    } else {[m
+[31m-        format!("0x{}", joined)[m
+[31m-    }[m
+[31m-}[m
+[31m-[m
+[31m-pub fn see_ix(x: &ix) {[m
+[31m-    if x.vals.is_empty() {[m
+[31m-        print!("0");[m
+[31m-        return;[m
+[31m-    }[m
+[31m-    if x.sign {[m
+[31m-        print!("-");[m
+[31m-    }[m
+[31m-    let mut parts = vec![];[m
+[31m-    for &limb in x.vals.iter().rev() {[m
+[31m-        parts.push(format!("{:016x}", limb));[m
+[31m-    }[m
+[31m-    let mut joined = parts.join("");[m
+[31m-    while joined.len() > 1 && joined.starts_with('0') {[m
+[31m-        joined.remove(0);[m
+[31m-    }[m
+[31m-    print!("{}", joined);[m
+[31m-}[m
+[31m-[m
+[1mdiff --git a/72/src/main.rs b/72/src/main.rs[m
+[1mdeleted file mode 100644[m
+[1mindex c5597b1..0000000[m
+[1m--- a/72/src/main.rs[m
+[1m+++ /dev/null[m
+[36m@@ -1,36 +0,0 @@[m
+[31m-use std::env;[m
+[31m-use bignum::{[m
+[31m-    add_ix, sub_ix, mul_ix, div_ix, rem_ix, h2i_ix, see_ix,[m
+[31m-};[m
+[31m-[m
+[31m-[m
+[31m-fn main() {[m
+[31m-    let args: Vec<String> = env::args().collect();[m
+[31m-    if args.len() != 4 {[m
+[31m-        eprintln!("Usage: cargo run <hex1> <hex2> <OP>");[m
+[31m-        std::process::exit(1);[m
+[31m-    }[m
+[31m-[m
+[31m-    let a_hex = &args[1];[m
+[31m-    let b_hex = &args[2];[m
+[31m-    let op = &args[3].to_uppercase();[m
+[31m-[m
+[31m-    let a = h2i_ix(a_hex);[m
+[31m-    let b = h2i_ix(b_hex);[m
+[31m-[m
+[31m-    let result = match op.as_str() {[m
+[31m-        "ADD" => add_ix(&a, &b),[m
+[31m-        "SUB" => sub_ix(&a, &b),[m
+[31m-        "MUL" => mul_ix(&a, &b),[m
+[31m-        "QUO" | "DIV" => div_ix(&a, &b),[m
+[31m-        "REM" => rem_ix(&a, &b),[m
+[31m-        _ => {[m
+[31m-            eprintln!("Unknown operation: {}", op);[m
+[31m-            std::process::exit(1);[m
+[31m-        }[m
+[31m-    };[m
+[31m-[m
+[31m-    see_ix(&result);[m
+[31m-    println!();[m
+[31m-}[m
+[31m-[m
+[1mdiff --git a/72/tester.py b/72/tester.py[m
+[1mdeleted file mode 100644[m
+[1mindex 46cd518..0000000[m
+[1m--- a/72/tester.py[m
+[1m+++ /dev/null[m
+[36m@@ -1,24 +0,0 @@[m
+[31m-DEBUG = 0[m
+[31m-CMD = "cargo run --"[m
+[31m-[m
+[31m-import subprocess, os, random[m
+[31m-from operator import add, sub, mul, floordiv as quo, mod as rem[m
+[31m-[m
+[31m-bigone, bigtwo = random.randint(2 ** 500, 2 ** 512), random.randint(2 ** 500, 2 ** 512)[m
+[31m-hexone, hextwo = hex(bigone), hex(bigtwo)[m
+[31m-DEBUG and print("\nhexone =\n", hexone, "\nhextwo = \n", hextwo)[m
+[31m-[m
+[31m-from operator import add, sub, mul, floordiv as quo, mod as rem[m
+[31m-ops = {'ADD':add,'SUB':sub,'MUL':mul,'QUO':quo,'REM':rem}[m
+[31m-for op in ops:[m
+[31m-    result = int(subprocess.check_output(["cargo", "run", hexone, hextwo, op]),16)[m
+[31m-    answer = ops[op](bigone,bigtwo)[m
+[31m-    if result != answer:[m
+[31m-        print("Operator", op, "failed.")[m
+[31m-        DEBUG and print("Expected:")[m
+[31m-        DEBUG and print(hex(answer))[m
+[31m-        DEBUG and print("Received:")[m
+[31m-        DEBUG and print(hex(result))[m
+[31m-        exit()[m
+[31m-    else:[m
+[31m-        print(op, "passes.")[m
